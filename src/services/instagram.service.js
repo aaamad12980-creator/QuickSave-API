@@ -3,12 +3,6 @@
 const ytdlpService = require('./ytdlpService');
 const playwrightSearchService = require('./playwrightSearchService');
 
-/**
- * Instagram platform service.
- * Direct links go through yt-dlp. Keyword search is not available for
- * Instagram (their search requires a logged-in session) — see
- * playwrightSearchService.js for details.
- */
 class InstagramService {
   async fetchMetadata(url) {
     return ytdlpService.getMetadata(url);
@@ -18,8 +12,8 @@ class InstagramService {
     return ytdlpService.getMetadata(url);
   }
 
-  async search() {
-    return playwrightSearchService.searchUnavailable('انستجرام');
+  async search(query) {
+    return playwrightSearchService.searchInstagram(query, 8);
   }
 }
 
