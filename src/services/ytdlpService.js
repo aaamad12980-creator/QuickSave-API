@@ -6,11 +6,10 @@ const logger = require('../utils/logger');
 const AppError = require('../errors/AppError');
 const errorCodes = require('../errors/errorCodes');
 
-const YTDLP_BIN = env.YTDLP_PATH || 'yt-dlp';
-
 function runYtDlp(args) {
   return new Promise((resolve, reject) => {
     const finalArgs = [
+      '-m', 'yt_dlp',
       ...args,
       '--no-warnings',
       '--no-playlist',
@@ -21,7 +20,7 @@ function runYtDlp(args) {
       finalArgs.push('--cookies', env.YTDLP_COOKIES_FILE);
     }
 
-    const child = spawn(YTDLP_BIN, finalArgs);
+    const child = spawn('python3', finalArgs);
 
     let stdout = '';
     let stderr = '';
