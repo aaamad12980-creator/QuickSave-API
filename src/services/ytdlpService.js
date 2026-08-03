@@ -20,7 +20,7 @@ function runYtDlp(args) {
       finalArgs.push('--cookies', env.YTDLP_COOKIES_FILE);
     }
 
-    const child = spawn('python3', finalArgs);
+    const child = spawn('python', finalArgs);
 
     let stdout = '';
     let stderr = '';
