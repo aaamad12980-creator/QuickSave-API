@@ -6,24 +6,8 @@ const logger = require('../utils/logger');
 const AppError = require('../errors/AppError');
 const errorCodes = require('../errors/errorCodes');
 
-/**
- * ytdlpService — the single place in the whole app that talks to the
- * yt-dlp command-line tool. Every platform service (YouTube, TikTok,
- * Facebook, Instagram) calls into this file instead of spawning yt-dlp
- * directly, so behaviour (timeouts, cookies, error handling) stays
- * consistent everywhere.
- */
-
 const YTDLP_BIN = env.YTDLP_PATH || 'yt-dlp';
 
-/**
- * Runs the yt-dlp binary with the given arguments and resolves with
- * whatever it printed to stdout (as a string). Rejects on non-zero exit
- * code or timeout.
- *
- * @param {string[]} args
- * @returns {Promise<string>}
- */
 function runYtDlp(args) {
   return new Promise((resolve, reject) => {
     const finalArgs = [
@@ -71,14 +55,6 @@ function runYtDlp(args) {
   });
 }
 
-/**
- * Picks the best matching "combined" (video+audio in one file) format,
- * and separately the best video-only and best audio-only formats.
- * YouTube in particular splits high-quality video and audio into
- * separate streams — this is where we detect that.
- *
- * @param {object[]} formats - the raw `formats` array from yt-dlp's JSON
- */
 function classifyFormats(formats = []) {
   const usable = formats.filter((f) => f.url && (f.vcodec !== 'none' || f.acodec !== 'none'));
 
@@ -132,14 +108,6 @@ function classifyFormats(formats = []) {
     });
 }
 
-/**
- * Fetches metadata (title, thumbnail, duration, direct playable url,
- * available qualities) for a single video URL. Works for YouTube, TikTok,
- * Facebook, and Instagram — yt-dlp supports direct links for all four.
- *
- * @param {string} url
- * @returns {Promise<object>}
- */
 async function getMetadata(url) {
   let raw;
   try {
@@ -147,7 +115,7 @@ async function getMetadata(url) {
   } catch (err) {
     logger.error('yt-dlp metadata extraction failed', { url, error: err.message });
     throw AppError.badRequest(
-      'تعذر جلب بيانات هذا الفيديو، تأكد من صحة الرابط',
+      'yt-dlp error: ' + err.message,
       errorCodes.EXTRACTION_FAILED
     );
   }
@@ -172,22 +140,13 @@ async function getMetadata(url) {
   };
 }
 
-/**
- * Searches YouTube for a text query using yt-dlp's built-in `ytsearchN:`
- * pseudo-URL. Only reliable for YouTube — TikTok/Facebook/Instagram search
- * is handled separately via Playwright (see playwrightSearchService.js).
- *
- * @param {string} query
- * @param {number} limit
- * @returns {Promise<object[]>}
- */
 async function searchYoutube(query, limit = 15) {
   let raw;
   try {
     raw = await runYtDlp(['--dump-json', `ytsearch${limit}:${query}`]);
   } catch (err) {
     logger.error('yt-dlp search failed', { query, error: err.message });
-    throw AppError.internal('تعذر تنفيذ البحث في يوتيوب حالياً', errorCodes.EXTRACTION_FAILED);
+    throw AppError.internal('yt-dlp error: ' + err.message, errorCodes.EXTRACTION_FAILED);
   }
 
   const lines = raw.split('\n').filter(Boolean);
