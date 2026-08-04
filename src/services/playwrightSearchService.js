@@ -5,7 +5,6 @@ const env = require('../config/env');
 const logger = require('../utils/logger');
 const AppError = require('../errors/AppError');
 const errorCodes = require('../errors/errorCodes');
-const ytdlpService = require('./ytdlpService');
 
 let browserPromise = null;
 
@@ -16,7 +15,32 @@ function getBrowser() {
   return browserPromise;
 }
 
-async function searchTikTok(query, limit = 12) {
+const MAX_RESULTS = 10;
+
+function dedupe(list) {
+  return Array.from(new Set(list));
+}
+
+async function autoScroll(page, times = 2, pixels = 1800, delay = 400) {
+  for (let i = 0; i < times; i++) {
+    await page.mouse.wheel(0, pixels);
+    await page.waitForTimeout(delay);
+  }
+}
+
+async function collectUrls(page, selector, limit, filterFn = null) {
+  let urls = [];
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const hrefs = await page.$$eval(selector, (anchors) => anchors.map((a) => a.href));
+    urls = dedupe(filterFn ? hrefs.filter(filterFn) : hrefs);
+    if (urls.length >= limit) break;
+    await autoScroll(page);
+  }
+  return urls.slice(0, limit);
+}
+
+async function searchTikTok(query, limit = MAX_RESULTS) {
+  const cappedLimit = Math.min(limit, MAX_RESULTS);
   const browser = await getBrowser();
   const context = await browser.newContext({
     userAgent:
@@ -26,33 +50,23 @@ async function searchTikTok(query, limit = 12) {
 
   try {
     const searchUrl = `https://www.tiktok.com/search?q=${encodeURIComponent(query)}`;
-    await page.goto(searchUrl, { timeout: env.PLAYWRIGHT_TIMEOUT_MS, waitUntil: 'domcontentloaded' });
+    await page.goto(searchUrl, { timeout: env.PLAYWRIGHT_TIMEOUT_MS, waitUntil: 'networkidle' });
 
-    await page.waitForSelector('a[href*="/video/"]', { timeout: env.PLAYWRIGHT_TIMEOUT_MS }).catch(() => null);
+    const linkSelector = 'a[href*="/video/"]';
+    await page.waitForSelector(linkSelector, { timeout: env.PLAYWRIGHT_TIMEOUT_MS }).catch(() => null);
 
-    const results = await page.$$eval('a[href*="/video/"]', (anchors, max) => {
-      const seen = new Set();
-      const items = [];
-      for (const a of anchors) {
-        const href = a.href;
-        if (seen.has(href)) continue;
-        seen.add(href);
+    const urls = await collectUrls(page, linkSelector, cappedLimit);
 
-        const img = a.querySelector('img');
-        const captionEl = a.closest('div')?.querySelector('[data-e2e="search-card-desc"]');
+    if (urls.length === 0) {
+      throw AppError.badRequest(
+        'لم يتم العثور على نتائج مطابقة لبحثك في تيك توك',
+        errorCodes.NO_RESULTS
+      );
+    }
 
-        items.push({
-          url: href,
-          thumbnail: img ? img.src : null,
-          title: captionEl ? captionEl.textContent.trim() : null,
-        });
-        if (items.length >= max) break;
-      }
-      return items;
-    }, limit);
-
-    return results;
+    return urls;
   } catch (err) {
+    if (err instanceof AppError) throw err;
     logger.error('TikTok search via Playwright failed', { query, error: err.message });
     throw AppError.internal('تعذر تنفيذ البحث في تيك توك حالياً', errorCodes.EXTRACTION_FAILED);
   } finally {
@@ -60,7 +74,8 @@ async function searchTikTok(query, limit = 12) {
   }
 }
 
-async function collectGoogleSiteLinks(domain, query, rawLimit = 20) {
+async function searchFacebook(query, limit = MAX_RESULTS) {
+  const cappedLimit = Math.min(limit, MAX_RESULTS);
   const browser = await getBrowser();
   const context = await browser.newContext({
     userAgent:
@@ -69,80 +84,133 @@ async function collectGoogleSiteLinks(domain, query, rawLimit = 20) {
   const page = await context.newPage();
 
   try {
-    const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(
-      `site:${domain} ${query}`
-    )}&num=${rawLimit}&hl=en`;
+    await page.goto('https://www.facebook.com/', {
+      timeout: env.PLAYWRIGHT_TIMEOUT_MS,
+      waitUntil: 'domcontentloaded',
+    });
 
-    await page.goto(searchUrl, { timeout: env.PLAYWRIGHT_TIMEOUT_MS, waitUntil: 'domcontentloaded' });
+    // Facebook renders its own search box (not a URL-based search) once the
+    // shell has hydrated; on some layouts it's hidden behind a magnifier icon.
+    const searchInputSelector =
+      'input[aria-label="Search Facebook"], input[placeholder="Search Facebook"], input[type="search"]';
+    const searchToggleSelector = '[aria-label="Search"], svg[aria-label="Search"]';
 
-    const hrefs = await page.$$eval('a', (anchors) => anchors.map((a) => a.href));
+    let searchInput = await page
+      .waitForSelector(searchInputSelector, { timeout: env.PLAYWRIGHT_TIMEOUT_MS })
+      .catch(() => null);
 
-    const seen = new Set();
-    const cleaned = [];
-
-    for (const href of hrefs) {
-      let url = href;
-
-      try {
-        const parsed = new URL(href);
-        const wrapped = parsed.searchParams.get('q');
-        if (wrapped) url = wrapped;
-      } catch {
-        continue;
+    if (!searchInput) {
+      const toggle = await page.$(searchToggleSelector);
+      if (toggle) {
+        await toggle.click().catch(() => null);
+        searchInput = await page
+          .waitForSelector(searchInputSelector, { timeout: env.PLAYWRIGHT_TIMEOUT_MS })
+          .catch(() => null);
       }
-
-      if (!url.includes(domain)) continue;
-      if (seen.has(url)) continue;
-      seen.add(url);
-      cleaned.push(url);
     }
 
-    return cleaned;
+    if (!searchInput) {
+      throw AppError.badRequest(
+        'تعذر الوصول إلى مربع البحث في فيسبوك، قد يتطلب ذلك تسجيل الدخول',
+        errorCodes.NO_RESULTS
+      );
+    }
+
+    await searchInput.click();
+    await searchInput.fill(query);
+    await searchInput.press('Enter');
+    await page.waitForLoadState('networkidle', { timeout: env.PLAYWRIGHT_TIMEOUT_MS }).catch(() => null);
+
+    const linkSelector = 'a[href*="/videos/"], a[href*="watch/?v="]';
+    await page.waitForSelector(linkSelector, { timeout: env.PLAYWRIGHT_TIMEOUT_MS }).catch(() => null);
+
+    const videoPattern = /\/videos\/\d+|watch\/?\?v=\d+/i;
+    const urls = await collectUrls(page, linkSelector, cappedLimit, (href) => videoPattern.test(href));
+
+    if (urls.length === 0) {
+      throw AppError.badRequest(
+        'لم يتم العثور على نتائج فيديو مطابقة لبحثك على فيسبوك',
+        errorCodes.NO_RESULTS
+      );
+    }
+
+    return urls;
   } catch (err) {
-    logger.error('Google site-search via Playwright failed', { domain, query, error: err.message });
-    return [];
+    if (err instanceof AppError) throw err;
+    logger.error('Facebook search via Playwright failed', { query, error: err.message });
+    throw AppError.internal('تعذر تنفيذ البحث في فيسبوك حالياً', errorCodes.EXTRACTION_FAILED);
   } finally {
     await context.close();
   }
 }
 
-async function searchViaGoogleSite(domain, query, videoLikePattern, limit = 8) {
-  const rawLinks = await collectGoogleSiteLinks(domain, query, 20);
-  const candidates = rawLinks.filter((url) => videoLikePattern.test(url)).slice(0, limit + 4);
+async function searchInstagram(query, limit = MAX_RESULTS) {
+  const cappedLimit = Math.min(limit, MAX_RESULTS);
+  const browser = await getBrowser();
+  const context = await browser.newContext({
+    userAgent:
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+  });
+  const page = await context.newPage();
 
-  const results = [];
-  for (const url of candidates) {
-    if (results.length >= limit) break;
-    try {
-      const metadata = await ytdlpService.getMetadata(url);
-      results.push({
-        title: metadata.title,
-        thumbnail: metadata.thumbnail,
-        duration: metadata.duration,
-        uploader: metadata.uploader,
-        url,
-      });
-    } catch {
-      continue;
+  try {
+    await page.goto('https://www.instagram.com/', {
+      timeout: env.PLAYWRIGHT_TIMEOUT_MS,
+      waitUntil: 'domcontentloaded',
+    });
+
+    // Instagram's search lives behind the nav search icon; the input only
+    // mounts in the DOM after that icon is activated on most layouts.
+    const searchInputSelector = 'input[placeholder="Search"], input[aria-label="Search input"]';
+    const searchToggleSelector =
+      'a[href="#"] svg[aria-label="Search"], span[aria-label="Search"], svg[aria-label="Search"]';
+
+    let searchInput = await page
+      .waitForSelector(searchInputSelector, { timeout: env.PLAYWRIGHT_TIMEOUT_MS })
+      .catch(() => null);
+
+    if (!searchInput) {
+      const toggle = await page.$(searchToggleSelector);
+      if (toggle) {
+        await toggle.click().catch(() => null);
+        searchInput = await page
+          .waitForSelector(searchInputSelector, { timeout: env.PLAYWRIGHT_TIMEOUT_MS })
+          .catch(() => null);
+      }
     }
+
+    if (!searchInput) {
+      throw AppError.badRequest(
+        'تعذر الوصول إلى مربع البحث في انستغرام، قد يتطلب ذلك تسجيل الدخول',
+        errorCodes.NO_RESULTS
+      );
+    }
+
+    await searchInput.click();
+    await searchInput.fill(query);
+    await searchInput.press('Enter');
+    await page.waitForLoadState('networkidle', { timeout: env.PLAYWRIGHT_TIMEOUT_MS }).catch(() => null);
+
+    const linkSelector = 'a[href*="/reel/"], a[href*="/p/"]';
+    await page.waitForSelector(linkSelector, { timeout: env.PLAYWRIGHT_TIMEOUT_MS }).catch(() => null);
+
+    const urls = await collectUrls(page, linkSelector, cappedLimit);
+
+    if (urls.length === 0) {
+      throw AppError.badRequest(
+        'لم يتم العثور على نتائج مطابقة لبحثك على انستغرام',
+        errorCodes.NO_RESULTS
+      );
+    }
+
+    return urls;
+  } catch (err) {
+    if (err instanceof AppError) throw err;
+    logger.error('Instagram search via Playwright failed', { query, error: err.message });
+    throw AppError.internal('تعذر تنفيذ البحث في انستغرام حالياً', errorCodes.EXTRACTION_FAILED);
+  } finally {
+    await context.close();
   }
-
-  if (results.length === 0) {
-    throw AppError.badRequest(
-      'لم يتم العثور على نتائج عامة مطابقة لبحثك، جرّب لصق رابط الفيديو مباشرة',
-      errorCodes.NO_RESULTS
-    );
-  }
-
-  return results;
-}
-
-async function searchFacebook(query, limit = 8) {
-  return searchViaGoogleSite('facebook.com', query, /\/videos\/|watch\/\?v=/i, limit);
-}
-
-async function searchInstagram(query, limit = 8) {
-  return searchViaGoogleSite('instagram.com', query, /\/reel\/|\/p\//i, limit);
 }
 
 async function closeBrowser() {
@@ -159,3 +227,4 @@ module.exports = {
   searchInstagram,
   closeBrowser,
 };
+
