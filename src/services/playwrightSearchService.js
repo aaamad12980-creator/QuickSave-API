@@ -48,21 +48,29 @@ async function searchTikTok(query, limit = MAX_RESULTS) {
   });
   const page = await context.newPage();
 
+  page.on('console', msg => {
+    logger.info(`TikTok browser console: ${msg.text()}`);
+  });
+
   try {
     const searchUrl = `https://www.tiktok.com/search?q=${encodeURIComponent(query)}`;
-    await page.goto(searchUrl, { 
-  timeout: env.PLAYWRIGHT_TIMEOUT_MS, 
-  waitUntil: 'domcontentloaded' 
-});
+    await page.goto(searchUrl, {
+      timeout: env.PLAYWRIGHT_TIMEOUT_MS,
+      waitUntil: 'domcontentloaded',
+    });
+    await page.waitForTimeout(5000);
 
-await page.waitForTimeout(5000);
-
-    const linkSelector = 'a[href*="/video/"]';
+    const linkSelector = 'a[href*="/video/"], a[href*="@"]';
     await page.waitForSelector(linkSelector, { timeout: env.PLAYWRIGHT_TIMEOUT_MS }).catch(() => null);
 
     const urls = await collectUrls(page, linkSelector, cappedLimit);
 
     if (urls.length === 0) {
+      await page.screenshot({
+        path: 'tiktok-debug.png',
+        fullPage: true,
+      });
+
       throw AppError.badRequest(
         'لم يتم العثور على نتائج مطابقة لبحثك في تيك توك',
         errorCodes.NO_RESULTS
@@ -133,7 +141,6 @@ async function searchFacebook(query, limit = MAX_RESULTS) {
     const urls = await collectUrls(page, linkSelector, cappedLimit, (href) => videoPattern.test(href));
 
     if (urls.length === 0) {
-  await page.screenshot({ path: 'tiktok-debug.png', fullPage: true });
       throw AppError.badRequest(
         'لم يتم العثور على نتائج فيديو مطابقة لبحثك على فيسبوك',
         errorCodes.NO_RESULTS
