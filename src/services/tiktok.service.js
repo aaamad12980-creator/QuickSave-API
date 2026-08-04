@@ -6,7 +6,8 @@ const playwrightSearchService = require('./playwrightSearchService');
 /**
  * TikTok platform service.
  * Direct links go through yt-dlp (fast, reliable, no browser needed).
- * Keyword search uses Playwright since yt-dlp cannot search TikTok itself.
+ * Keyword search uses Playwright to get video URLs, then yt-dlp to
+ * fetch metadata for each URL (title, thumbnail).
  */
 class TiktokService {
   async fetchMetadata(url) {
@@ -18,7 +19,25 @@ class TiktokService {
   }
 
   async search(query) {
-    return playwrightSearchService.searchTikTok(query, 12);
+    const urls = await playwrightSearchService.searchTikTok(query, 10);
+
+    const results = [];
+
+    for (const url of urls) {
+      try {
+        const metadata = await ytdlpService.getMetadata(url);
+
+        results.push({
+          title: metadata.title,
+          thumbnail: metadata.thumbnail,
+          url
+        });
+      } catch (error) {
+        continue;
+      }
+    }
+
+    return results;
   }
 }
 
