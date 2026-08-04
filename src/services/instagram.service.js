@@ -13,7 +13,25 @@ class InstagramService {
   }
 
   async search(query) {
-    return playwrightSearchService.searchInstagram(query, 8);
+    const urls = await playwrightSearchService.searchInstagram(query, 10);
+
+    const results = [];
+
+    for (const url of urls) {
+      try {
+        const metadata = await ytdlpService.getMetadata(url);
+
+        results.push({
+          title: metadata.title,
+          thumbnail: metadata.thumbnail,
+          url
+        });
+      } catch (error) {
+        continue;
+      }
+    }
+
+    return results;
   }
 }
 
