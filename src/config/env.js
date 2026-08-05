@@ -41,6 +41,10 @@ const env = {
   YTDLP_PATH: getEnv('YTDLP_PATH', 'yt-dlp'),
   YTDLP_TIMEOUT_MS: getEnvInt('YTDLP_TIMEOUT_MS', 30000),
   YTDLP_COOKIES_FILE: getEnv('YTDLP_COOKIES_FILE', ''),
+  YTDLP_COOKIES_CONTENT: getEnv('YTDLP_COOKIES_CONTENT', ''),
+  FB_COOKIES_CONTENT: getEnv('FB_COOKIES_CONTENT', ''),
+  IG_COOKIES_CONTENT: getEnv('IG_COOKIES_CONTENT', ''),
+  TIKTOK_COOKIES_CONTENT: getEnv('TIKTOK_COOKIES_CONTENT', ''),
 
   PLAYWRIGHT_TIMEOUT_MS: getEnvInt('PLAYWRIGHT_TIMEOUT_MS', 25000),
   PLAYWRIGHT_HEADLESS: getEnv('PLAYWRIGHT_HEADLESS', 'true') !== 'false',
@@ -52,5 +56,12 @@ const env = {
     return this.NODE_ENV === 'development';
   },
 };
+
+if (env.YTDLP_COOKIES_CONTENT && !env.YTDLP_COOKIES_FILE) {
+  const fs = require('fs');
+  const cookiesPath = path.resolve(process.cwd(), 'yt-cookies.txt');
+  fs.writeFileSync(cookiesPath, env.YTDLP_COOKIES_CONTENT, 'utf8');
+  env.YTDLP_COOKIES_FILE = cookiesPath;
+}
 
 module.exports = env;
