@@ -14,6 +14,7 @@ function runYtDlp(args) {
       '--no-warnings',
       '--no-playlist',
       '--socket-timeout', '15',
+      '--extractor-args', 'youtube:player_client=web_embedded',
     ];
 
     if (env.YTDLP_COOKIES_FILE) {
