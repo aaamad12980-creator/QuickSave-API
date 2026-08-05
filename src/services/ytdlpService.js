@@ -144,9 +144,33 @@ async function searchYoutube(query, limit = 15) {
   const playwrightSearch = require('./playwrightSearchService');
   
   try {
-    return await playwrightSearch.searchYoutube(query, limit);
+    // Step 1: Playwright يبحث ويجيب الروابط
+    const playlistResults = await playwrightSearch.searchYoutube(query, limit);
+    
+    // Step 2: لكل رابط، نطلب metadata من yt-dlp
+    const results = [];
+    for (const item of playlistResults) {
+      try {
+        const metadata = await getMetadata(item.url);
+        results.push(metadata);
+      } catch (err) {
+        logger.warn('Failed to get metadata for YouTube URL', { url: item.url, error: err.message });
+        // لو فشل yt-dlp، نرجع البيانات اللي عندنا من Playwright على الأقل
+        results.push({
+          title: item.title || 'Unknown Title',
+          thumbnail: item.thumbnail || null,
+          duration: item.duration || null,
+          uploader: item.uploader || null,
+          sourceUrl: item.url,
+          directUrl: null,
+          qualities: [],
+        });
+      }
+    }
+    
+    return results;
   } catch (err) {
-    logger.error('YouTube search via Playwright failed', { query, error: err.message });
+    logger.error('YouTube search failed', { query, error: err.message });
     throw AppError.internal('تعذر تنفيذ البحث في يوتيوب حالياً', errorCodes.EXTRACTION_FAILED);
   }
 }
