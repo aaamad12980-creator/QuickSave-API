@@ -6,7 +6,7 @@ RUN apt-get update && apt-get install -y \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip3 install --break-system-packages -U yt-dlp-nightly
+RUN pip3 install --break-system-packages -U "yt-dlp[default]"
 
 WORKDIR /app
 
