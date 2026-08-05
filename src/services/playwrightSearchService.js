@@ -40,6 +40,54 @@ async function collectUrls(page, selector, limit, filterFn = null) {
   return urls.slice(0, limit);
 }
 
+async function searchYoutube(query, limit = MAX_RESULTS) {
+  const cappedLimit = Math.min(limit, MAX_RESULTS);
+  const browser = await getBrowser();
+  const context = await browser.newContext({
+    userAgent:
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+  });
+  const youtubeCookies = parseNetscapeCookies(env.YTDLP_COOKIES_CONTENT);
+  if (youtubeCookies.length) {
+    await context.addCookies(youtubeCookies);
+  }
+
+  const page = await context.newPage();
+
+  try {
+    const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
+    await page.goto(searchUrl, {
+      timeout: env.PLAYWRIGHT_TIMEOUT_MS,
+      waitUntil: 'domcontentloaded',
+    });
+    await page.waitForTimeout(3000);
+
+    const linkSelector = 'a[href*="/watch?v="]';
+    const urls = await collectUrls(page, linkSelector, cappedLimit, (href) => href.includes('/watch?v='));
+
+    if (urls.length === 0) {
+      throw AppError.badRequest(
+        'لم يتم العثور على نتائج مطابقة لبحثك في يوتيوب',
+        errorCodes.NO_RESULTS
+      );
+    }
+
+    return urls.map((url) => ({
+      url: url.startsWith('http') ? url : `https://www.youtube.com${url}`,
+      title: null,
+      thumbnail: null,
+      duration: null,
+      uploader: null,
+    }));
+  } catch (err) {
+    if (err instanceof AppError) throw err;
+    logger.error('YouTube search via Playwright failed', { query, error: err.message });
+    throw AppError.internal('تعذر تنفيذ البحث في يوتيوب حالياً', errorCodes.EXTRACTION_FAILED);
+  } finally {
+    await context.close();
+  }
+}
+
 async function searchTikTok(query, limit = MAX_RESULTS) {
   const cappedLimit = Math.min(limit, MAX_RESULTS);
   const browser = await getBrowser();
@@ -113,8 +161,6 @@ async function searchFacebook(query, limit = MAX_RESULTS) {
       waitUntil: 'domcontentloaded',
     });
 
-    // Facebook renders its own search box (not a URL-based search) once the
-    // shell has hydrated; on some layouts it's hidden behind a magnifier icon.
     const searchInputSelector =
       'input[aria-label="Search Facebook"], input[placeholder="Search Facebook"], input[type="search"]';
     const searchToggleSelector = '[aria-label="Search"], svg[aria-label="Search"]';
@@ -188,8 +234,6 @@ async function searchInstagram(query, limit = MAX_RESULTS) {
       waitUntil: 'domcontentloaded',
     });
 
-    // Instagram's search lives behind the nav search icon; the input only
-    // mounts in the DOM after that icon is activated on most layouts.
     const searchInputSelector = 'input[placeholder="Search"], input[aria-label="Search input"]';
     const searchToggleSelector =
       'a[href="#"] svg[aria-label="Search"], span[aria-label="Search"], svg[aria-label="Search"]';
@@ -251,6 +295,7 @@ async function closeBrowser() {
 }
 
 module.exports = {
+  searchYoutube,
   searchTikTok,
   searchFacebook,
   searchInstagram,
