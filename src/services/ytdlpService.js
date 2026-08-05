@@ -141,27 +141,14 @@ async function getMetadata(url) {
 }
 
 async function searchYoutube(query, limit = 15) {
-  let raw;
+  const playwrightSearch = require('./playwrightSearchService');
+  
   try {
-    raw = await runYtDlp(['--dump-json', `ytsearch${limit}:${query}`]);
+    return await playwrightSearch.searchYoutube(query, limit);
   } catch (err) {
-    logger.error('yt-dlp search failed', { query, error: err.message });
-    throw AppError.internal('yt-dlp error: ' + err.message, errorCodes.EXTRACTION_FAILED);
+    logger.error('YouTube search via Playwright failed', { query, error: err.message });
+    throw AppError.internal('تعذر تنفيذ البحث في يوتيوب حالياً', errorCodes.EXTRACTION_FAILED);
   }
-
-  const lines = raw.split('\n').filter(Boolean);
-  const results = lines.map((line) => {
-    const info = JSON.parse(line);
-    return {
-      title: info.title || null,
-      thumbnail: info.thumbnail || (info.thumbnails?.at(-1)?.url ?? null),
-      duration: info.duration || null,
-      uploader: info.uploader || info.channel || null,
-      url: info.webpage_url || info.url,
-    };
-  });
-
-  return results;
 }
 
 module.exports = { getMetadata, searchYoutube };
