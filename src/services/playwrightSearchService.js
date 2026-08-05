@@ -5,6 +5,7 @@ const env = require('../config/env');
 const logger = require('../utils/logger');
 const AppError = require('../errors/AppError');
 const errorCodes = require('../errors/errorCodes');
+const { parseNetscapeCookies } = require('../utils/cookieParser');
 
 let browserPromise = null;
 
@@ -46,6 +47,11 @@ async function searchTikTok(query, limit = MAX_RESULTS) {
     userAgent:
       'Mozilla/5.0 (Linux; Android 13; SM-A146U) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36',
   });
+  const tiktokCookies = parseNetscapeCookies(env.TIKTOK_COOKIES_CONTENT);
+  if (tiktokCookies.length) {
+    await context.addCookies(tiktokCookies);
+  }
+
   const page = await context.newPage();
 
   page.on('console', msg => {
@@ -94,6 +100,11 @@ async function searchFacebook(query, limit = MAX_RESULTS) {
     userAgent:
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
   });
+  const fbCookies = parseNetscapeCookies(env.FB_COOKIES_CONTENT);
+  if (fbCookies.length) {
+    await context.addCookies(fbCookies);
+  }
+
   const page = await context.newPage();
 
   try {
@@ -164,6 +175,11 @@ async function searchInstagram(query, limit = MAX_RESULTS) {
     userAgent:
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
   });
+  const igCookies = parseNetscapeCookies(env.IG_COOKIES_CONTENT);
+  if (igCookies.length) {
+    await context.addCookies(igCookies);
+  }
+
   const page = await context.newPage();
 
   try {
