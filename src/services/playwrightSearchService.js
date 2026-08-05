@@ -62,19 +62,35 @@ async function searchYoutube(query, limit = MAX_RESULTS) {
     });
     await page.waitForTimeout(3000);
 
-    const linkSelector = 'a[href*="/watch?v="]';
-    const urls = await collectUrls(page, linkSelector, cappedLimit, (href) => href.includes('/watch?v='));
+    const results = await page.evaluate(() => {
+      const videos = [];
+      const items = document.querySelectorAll('a#video-title');
+      
+      items.forEach((item) => {
+        const url = item.getAttribute('href');
+        const title = item.getAttribute('title') || item.textContent.trim();
+        
+        if (url && url.includes('/watch?v=')) {
+          videos.push({
+            url: url.startsWith('http') ? url : `https://www.youtube.com${url}`,
+            title: title || null,
+          });
+        }
+      });
+      
+      return videos.slice(0, 15);
+    });
 
-    if (urls.length === 0) {
+    if (results.length === 0) {
       throw AppError.badRequest(
         'لم يتم العثور على نتائج مطابقة لبحثك في يوتيوب',
         errorCodes.NO_RESULTS
       );
     }
 
-    return urls.map((url) => ({
-      url: url.startsWith('http') ? url : `https://www.youtube.com${url}`,
-      title: null,
+    return results.map((r) => ({
+      url: r.url,
+      title: r.title,
       thumbnail: null,
       duration: null,
       uploader: null,
