@@ -147,7 +147,7 @@ async function searchYoutube(query, limit = 15) {
     playlistResults = await playwrightSearch.searchYoutube(query, limit);
   } catch (err) {
     logger.error('YouTube search failed', { query, error: err.message });
-    throw AppError.internal('تعذر تنفيذ البحث في يوتيوب حالياً', errorCodes.EXTRACTION_FAILED);
+    throw AppError.internal('يوتيوب: ' + err.message, errorCodes.EXTRACTION_FAILED);
   }
 
   const results = [];
