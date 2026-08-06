@@ -14,7 +14,6 @@ function runYtDlp(args) {
       '--no-warnings',
       '--no-playlist',
       '--socket-timeout', '15',
-      '--extractor-args', 'youtube:player_client=web_embedded',
     ];
 
     if (env.YTDLP_COOKIES_FILE) {
@@ -142,37 +141,38 @@ async function getMetadata(url) {
 
 async function searchYoutube(query, limit = 15) {
   const playwrightSearch = require('./playwrightSearchService');
-  
+
+  let playlistResults;
   try {
-    // Step 1: Playwright يبحث ويجيب الروابط
-    const playlistResults = await playwrightSearch.searchYoutube(query, limit);
-    
-    // Step 2: لكل رابط، نطلب metadata من yt-dlp
-    const results = [];
-    for (const item of playlistResults) {
-      try {
-        const metadata = await getMetadata(item.url);
-        results.push(metadata);
-      } catch (err) {
-        logger.warn('Failed to get metadata for YouTube URL', { url: item.url, error: err.message });
-        // لو فشل yt-dlp، نرجع البيانات اللي عندنا من Playwright على الأقل
-        results.push({
-          title: item.title || 'Unknown Title',
-          thumbnail: item.thumbnail || null,
-          duration: item.duration || null,
-          uploader: item.uploader || null,
-          sourceUrl: item.url,
-          directUrl: null,
-          qualities: [],
-        });
-      }
-    }
-    
-    return results;
+    playlistResults = await playwrightSearch.searchYoutube(query, limit);
   } catch (err) {
     logger.error('YouTube search failed', { query, error: err.message });
     throw AppError.internal('تعذر تنفيذ البحث في يوتيوب حالياً', errorCodes.EXTRACTION_FAILED);
   }
+
+  const results = [];
+  for (const item of playlistResults) {
+    if (!item.url) continue;
+
+    try {
+      const metadata = await getMetadata(item.url);
+      results.push(metadata);
+    } catch (err) {
+      logger.warn('Failed to get metadata for YouTube URL', { url: item.url, error: err.message });
+      // حتى لو yt-dlp فشل، ارجع على الأقل الرابط والعنوان اللي جابهم Playwright
+      results.push({
+        title: item.title || null,
+        thumbnail: item.thumbnail || null,
+        duration: item.duration || null,
+        uploader: item.uploader || null,
+        sourceUrl: item.url,
+        directUrl: null,
+        qualities: [],
+      });
+    }
+  }
+
+  return results;
 }
 
 module.exports = { getMetadata, searchYoutube };
