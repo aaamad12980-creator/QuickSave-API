@@ -4,8 +4,9 @@ const ytdlpService = require('./ytdlpService');
 
 /**
  * YouTube platform service.
- * Handles both direct-link lookups and text search (using yt-dlp's
- * ytsearch: feature, which works natively and reliably for YouTube).
+ * Handles both direct-link lookups and text search.
+ * Search: Playwright يجيب روابط النتائج، وyt-dlp يجيب التفاصيل الكاملة
+ * لكل رابط (وإن فشل، برضه بيرجع الرابط والعنوان على الأقل).
  */
 class YoutubeService {
   async fetchMetadata(url) {
@@ -17,7 +18,12 @@ class YoutubeService {
   }
 
   async search(query) {
-    return ytdlpService.searchYoutube(query, 15);
+    const results = await ytdlpService.searchYoutube(query, 15);
+    return results.map((r) => ({
+      title: r.title,
+      thumbnail: r.thumbnail,
+      url: r.sourceUrl,
+    }));
   }
 }
 
